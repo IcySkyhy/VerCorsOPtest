@@ -1,0 +1,38 @@
+# ============================================================
+# .gitignore — VerCors 数据采集项目
+# ============================================================
+
+# 环境变量（含 API Key）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VerCors 验证输出日志
+*.out
+
+# Agent 运行时产物
+temp/
+output/
+failed/
+*.log
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python 虚拟环境
+venv/
+.venv/
+env/
