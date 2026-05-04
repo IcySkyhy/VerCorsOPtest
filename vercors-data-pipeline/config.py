@@ -5,6 +5,15 @@ VerCors 数据采集 Agent — 配置文件
 
 import os
 
+# ── 自动加载 .env 文件（如果 python-dotenv 已安装）──
+try:
+    from dotenv import load_dotenv
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    load_dotenv(_env_path)
+except ImportError:
+    # python-dotenv 未安装时静默跳过，依赖系统环境变量
+    pass
+
 # ============================================================
 # DeepSeek API 配置（兼容 openai 库）
 # ============================================================
