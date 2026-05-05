@@ -24,10 +24,15 @@ MODEL_REGISTRY = {
         "provider": "openai",                # 使用 openai 兼容客户端
         "api_key": os.environ.get("DEEPSEEK_API_KEY", "sk-your-api-key-here"),
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-pro",          # V4 Pro 模型（deepseek-chat 将于 2026/07/24 弃用）
         "temperature": 0.3,
         "max_tokens": 65536,
         "timeout": 180,
+        # DeepSeek V4 深度思考（编码任务建议开启）
+        "extra_body": {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": "high",
+        },
     },
     "glm": {
         "provider": "zai",                   # 使用 zai-sdk 客户端

@@ -98,14 +98,19 @@ def call_llm(
 
 
 def _call_openai(messages: list[dict], model_name: str, cfg: dict) -> str:
-    """通过 openai 兼容接口调用（DeepSeek）。"""
+    """通过 openai 兼容接口调用（DeepSeek / GLM-openai）。"""
     client = _get_openai_client(model_name)
-    response = client.chat.completions.create(
-        model=cfg["model"],
-        messages=messages,
-        temperature=cfg["temperature"],
-        max_tokens=cfg["max_tokens"],
-    )
+    kwargs = {
+        "model": cfg["model"],
+        "messages": messages,
+        "temperature": cfg["temperature"],
+        "max_tokens": cfg["max_tokens"],
+    }
+    # 透传 extra_body（如 thinking、reasoning_effort）
+    extra = cfg.get("extra_body")
+    if extra:
+        kwargs["extra_body"] = extra
+    response = client.chat.completions.create(**kwargs)
     return response.choices[0].message.content
 
 
