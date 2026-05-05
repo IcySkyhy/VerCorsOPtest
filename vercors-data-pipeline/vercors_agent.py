@@ -130,7 +130,7 @@ def process_file(
     clean_file_path: str,
     model_name: str = None,
     fallback_model: str = None,
-    enable_cross_model: bool = True,
+    enable_cross_model: bool = False
 ) -> Optional[dict]:
     """
     对单个干净 C 文件执行多轮注释生成 + 验证循环。
@@ -147,10 +147,10 @@ def process_file(
     """
     model_name = model_name or config.DEFAULT_MODEL
     file_id = os.path.splitext(os.path.basename(clean_file_path))[0]
-    logger.info(f"\n{'='*60}")
+    logger.info(f"{'='*60}")
     logger.info(f"处理文件: {file_id}  |  模型: {model_name}")
     if fallback_model:
-        logger.info(f"  跨模型回退: {fallback_model}")
+        logger.info(f"跨模型回退: {fallback_model}")
     logger.info(f"{'='*60}")
 
     # 读取干净代码
