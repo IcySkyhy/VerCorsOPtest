@@ -183,7 +183,7 @@ def process_file(
                 llm_response = call_llm(messages, current_model)
                 used_model = current_model
         except Exception as e:
-            logger.error(f"  所有模型调用均失败: {e}")
+            logger.error(f"所有模型调用均失败: {e}")
             trajectory_rounds.append({
                 "round": round_num,
                 "model": current_model,
@@ -201,7 +201,7 @@ def process_file(
         try:
             annotated_code = extract_c_code(llm_response)
         except ValueError:
-            logger.warning("  代码提取失败，使用原始响应")
+            logger.warning("代码提取失败，使用原始响应")
             annotated_code = llm_response.strip()
 
         # 写入临时文件
@@ -227,7 +227,7 @@ def process_file(
         trajectory_rounds.append(round_record)
 
         if passed:
-            logger.info(f"  ✅ 验证通过！模型: {used_model}, 轮数: {round_num}")
+            logger.info(f"验证通过！模型: {used_model}, 轮数: {round_num}")
             return {
                 "id": file_id,
                 "original_code": clean_code,
@@ -240,7 +240,7 @@ def process_file(
             }
 
         # 验证失败：构造反馈
-        logger.info(f"  ❌ 验证失败 [{used_model}]，准备反馈...")
+        logger.info(f"验证失败 [{used_model}]，准备反馈...")
         errors = extract_errors(vercors_output)
         feedback_prompt = (
             FEEDBACK_USER_TEMPLATE
@@ -266,7 +266,7 @@ def process_file(
             enable_cross_model=False,
         )
 
-    logger.warning(f"  💀 超过最大重试次数，标记为失败")
+    logger.warning(f"超过最大重试次数，标记为失败")
     return None
 
 
@@ -417,7 +417,8 @@ def main() -> None:
             stats["failed"] += 1
 
         avg_rounds = stats["total_rounds"] / stats["passed"] if stats["passed"] > 0 else 0
-        logger.info(f"  📊 通过 {stats['passed']}, 失败 {stats['failed']}, 平均轮数 {avg_rounds:.1f}")
+        logger.info(f"当前统计: 通过 {stats['passed']}, 失败 {stats['failed']}, "
+                     f"平均轮数 {avg_rounds:.1f}")
 
     # 最终报告
     logger.info(f"\n{'='*60}")

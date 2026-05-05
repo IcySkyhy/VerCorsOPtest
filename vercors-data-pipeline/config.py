@@ -24,10 +24,10 @@ MODEL_REGISTRY = {
         "provider": "openai",                # 使用 openai 兼容客户端
         "api_key": os.environ.get("DEEPSEEK_API_KEY", "sk-your-api-key-here"),
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-pro",
         "temperature": 0.3,
-        "max_tokens": 4096,
-        "timeout": 120,
+        "max_tokens": 65536,
+        "timeout": 180,
     },
     "glm": {
         "provider": "zai",                   # 使用 zai-sdk 客户端
@@ -76,8 +76,10 @@ VERCORS_TIMEOUT = 120
 # ============================================================
 # Agent 循环参数
 # ============================================================
-MAX_RETRIES = 10           # 单模型最大重试轮数
 
+MAX_RETRIES = 10            # 最大重试轮数（首轮 + 4 次反馈修正）
+TEMP_DIR = "temp"    
+     
 # ============================================================
 # 路径配置
 # ============================================================
