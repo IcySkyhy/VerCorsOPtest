@@ -106,23 +106,22 @@ STATS_FILE = os.path.join(OUTPUT_DIR, "stats.json")
 # ============================================================
 CODE_GEN_CONFIG = {
     "target_count": 10000,                  # 目标语料总数
-    "gen_batch_size": 20,                   # 每批让 LLM 一次生成多少个函数
-    "max_concurrent": 4,                    # 并发请求数
+    "gen_batch_size": 8,                    # 每类别每次生成的函数数（过大易超时）
+    "max_concurrent": 1,                    # 并发请求数（单线程顺序，避免限流）
     "templates_file": os.path.join(BASE_DIR, "prompts", "code_gen_templates.txt"),
-    # 代码生成使用的模型（建议用便宜的模型生成，用强的模型验证）
-    "gen_model": "deepseek",               # 生成候选代码的模型
-    "verify_model": "deepseek",            # 驱动 VerCors 验证的模型（可与 gen 不同）
-    # 多样性控制
+    # 代码生成使用的模型（--model 命令行覆盖，或跟随 VERCORS_AGENT_MODEL）
+    "gen_model": DEFAULT_MODEL,             # 默认跟随 .env
+    "verify_model": DEFAULT_MODEL,          # 驱动 VerCors 验证的模型
     "min_lines": 5,
     "max_lines": 60,
     "categories": [
-        "arithmetic",       # 纯计算
-        "array_readonly",   # 数组只读
-        "array_readwrite",  # 数组读写
-        "conditional",      # 条件分支
-        "nested_loop",      # 嵌套循环
-        "prefix_cumulative",# 前缀/累积
-        "multi_array",      # 多数组操作
+        "arithmetic",
+        "array_readonly",
+        "array_readwrite",
+        "conditional",
+        "nested_loop",
+        "prefix_cumulative",
+        "multi_array",
     ],
 }
 

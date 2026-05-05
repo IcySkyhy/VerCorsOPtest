@@ -182,6 +182,21 @@ def _extract_functions(llm_output: str) -> list[str]:
 # ============================================================
 # 主生成循环
 # ============================================================
+def _call_llm_with_retry(messages: list[dict], model_name: str, max_retries: int = 3) -> str:
+    """调用 LLM，带自动重试。"""
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return call_llm(messages, model_name)
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                logger.warning(f"  API 调用失败 (尝试 {attempt}/{max_retries})，{wait}s 后重试: {e}")
+                time.sleep(wait)
+    raise last_error
+
+
 def generate_corpus(
     target_count: int = None,
     gen_model: str = None,
@@ -189,14 +204,11 @@ def generate_corpus(
     dry_run: bool = False,
 ) -> int:
     """
-    自动生成 C 代码语料库。
-
-    Returns:
-        成功写入的文件数
+    自动生成 C 代码语料库。每次只对一个类别调用 LLM，避免单次 prompt 过大。
     """
     cfg = config.CODE_GEN_CONFIG
     target_count = target_count or cfg["target_count"]
-    gen_model = gen_model or cfg["gen_model"]
+    gen_model = gen_model or config.DEFAULT_MODEL    # 改为跟随 .env 的 VERCORS_AGENT_MODEL
     batch_size = batch_size or cfg["gen_batch_size"]
     categories = cfg["categories"]
 
@@ -223,70 +235,69 @@ def generate_corpus(
 
     total_generated = 0
     round_num = 0
-    max_rounds = (needed // (batch_size * len(categories))) + 5
+    # 每轮每个类别的并发数（避免单次 prompt 过大）
+    per_call = min(batch_size, 8)
+    max_rounds = (needed // (per_call * len(categories))) + 10
 
     os.makedirs(config.CORPUS_DIR, exist_ok=True)
 
+    logger.info(f"模型: {gen_model} ({config.get_model_config(gen_model)['model']})")
+
     while total_generated < needed and round_num < max_rounds:
         round_num += 1
-        remaining = needed - total_generated
-        per_cat = min(batch_size, max(1, remaining // len(categories) + 1))
 
-        logger.info(f"\n{'='*50}")
-        logger.info(f"Round {round_num}/{max_rounds}: 每类别生成 {per_cat} 个，剩余需求 {remaining}")
-        logger.info(f"{'='*50}")
-
-        # 构建 prompt
-        prompt = _build_batch_prompt(categories, per_cat)
-        messages = [
-            {"role": "system", "content": "你是一位精通 C 语言的系统编程专家。只输出代码，不输出解释。"},
-            {"role": "user", "content": prompt},
-        ]
-
-        try:
-            llm_output = call_llm(messages, gen_model)
-        except Exception as e:
-            logger.error(f"LLM 调用失败: {e}")
-            continue
-
-        # 提取函数
-        functions = _extract_functions(llm_output)
-        logger.info(f"  提取到 {len(functions)} 个候选函数")
-
-        new_count = 0
-        for func in functions:
+        # 每轮遍历所有类别，每次只请求一个类别（避免单次 prompt 过大超时）
+        for cat in categories:
             if total_generated >= needed:
                 break
 
-            # 质量过滤
-            lines = func.strip().split("\n")
-            if len(lines) < cfg["min_lines"] or len(lines) > cfg["max_lines"]:
-                continue
-            if "/*@" in func or "//" in func:
-                continue  # 包含注释，跳过
+            logger.info(f"  [{gen_model}] 类别={cat}, 轮={round_num}, 已生成={total_generated}/{needed}")
 
-            # 去重
-            h = _code_hash(func)
-            if h in existing_hashes:
-                continue
+            prompt = _build_gen_prompt(cat, per_call)
+            messages = [
+                {"role": "system", "content": "你是一位精通 C 语言的系统编程专家。只输出代码，不输出解释。"},
+                {"role": "user", "content": prompt},
+            ]
 
-            # 语法检查
-            ok, err = _syntax_check(func)
-            if not ok:
-                logger.debug(f"  语法错误，跳过: {err[:100]}")
+            try:
+                llm_output = _call_llm_with_retry(messages, gen_model)
+            except Exception as e:
+                logger.error(f"  LLM 调用最终失败 [{cat}]: {e}")
                 continue
 
-            # 写入文件
-            existing_hashes.add(h)
-            safe_name = f"gen_{total_generated + 1:05d}.c"
-            file_path = os.path.join(config.CORPUS_DIR, safe_name)
-            if not dry_run:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(func)
-            new_count += 1
-            total_generated += 1
+            # 提取函数
+            functions = _extract_functions(llm_output)
+            logger.info(f"    提取到 {len(functions)} 个候选")
 
-        logger.info(f"  本轮新增: {new_count}, 累计: {total_generated}/{needed}")
+            for func in functions:
+                if total_generated >= needed:
+                    break
+
+                # 质量过滤
+                lines = func.strip().split("\n")
+                if len(lines) < cfg["min_lines"] or len(lines) > cfg["max_lines"]:
+                    continue
+                if "/*@" in func or "//" in func:
+                    continue
+
+                # 去重
+                h = _code_hash(func)
+                if h in existing_hashes:
+                    continue
+
+                # 语法检查
+                ok, err = _syntax_check(func)
+                if not ok:
+                    logger.debug(f"    语法错误: {err[:80]}")
+                    continue
+
+                existing_hashes.add(h)
+                safe_name = f"gen_{total_generated + 1:05d}.c"
+                file_path = os.path.join(config.CORPUS_DIR, safe_name)
+                if not dry_run:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(func)
+                total_generated += 1
 
     logger.info(f"\n生成完成: 共 {total_generated} 个新文件")
     return total_generated
@@ -330,8 +341,11 @@ def main():
         description="VerCors 语料自动生成器 — LLM 批量合成 C 函数"
     )
     parser.add_argument("--count", type=int, default=None, help="目标文件总数")
-    parser.add_argument("--model", type=str, default=None, help="用于生成的模型")
-    parser.add_argument("--batch-size", type=int, default=None, help="每批生成数")
+    parser.add_argument(
+        "--model", type=str, default=None,
+        help=f"使用的模型，可用: {list(config.MODEL_REGISTRY.keys())}（默认跟随 .env 的 VERCORS_AGENT_MODEL）"
+    )
+    parser.add_argument("--batch-size", type=int, default=None, help="每类别每次生成的函数数（默认 8）")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不写入文件")
     parser.add_argument("--dedup", action="store_true", help="仅对现有语料去重")
     args = parser.parse_args()
