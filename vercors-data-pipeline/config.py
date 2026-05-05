@@ -32,13 +32,23 @@ MODEL_REGISTRY = {
     "glm": {
         "provider": "zai",                   # 使用 zai-sdk 客户端
         "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
         "model": "glm-5.1",
         "temperature": 0.3,
         "max_tokens": 65536,                 # GLM-5.1 最大输出 128K
         "timeout": 120,
         # GLM-5.1 深度思考（编码任务建议开启）
         "thinking": {"type": "enabled"},
+    },
+    # 备选：如果 zai-sdk URL 有问题，用 openai 兼容路径直连 coding 端点
+    "glm-openai": {
+        "provider": "openai",
+        "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "model": "glm-5.1",
+        "temperature": 0.3,
+        "max_tokens": 65536,
+        "timeout": 120,
     },
 }
 

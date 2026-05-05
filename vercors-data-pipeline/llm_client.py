@@ -40,17 +40,33 @@ def _get_openai_client(model_name: str) -> OpenAI:
 
 
 def _get_zai_client():
-    """懒加载 zai-sdk 客户端（GLM-5.1）。"""
+    """懒加载 zai-sdk 客户端（GLM-5.1），使用 coding 套餐端点。"""
     global _zai_client
     if _zai_client is None:
+        cfg = config.get_model_config("glm")
+
+        # zai-sdk 通过环境变量 ZHIPUAI_BASE_URL 读取自定义端点
+        # 必须在 import 前设置，否则 SDK 会用默认的 /api/paas/v4
+        import os as _os
+        _os.environ.setdefault("ZHIPUAI_BASE_URL", cfg["base_url"])
+
         try:
             from zai import ZhipuAiClient
         except ImportError:
             raise ImportError(
                 "GLM 模型需要 zai-sdk，请执行: pip install zai-sdk"
             )
-        cfg = config.get_model_config("glm")
-        _zai_client = ZhipuAiClient(api_key=cfg["api_key"])
+
+        # 尝试显式传 base_url（SDK >= 0.2.0 支持）
+        try:
+            _zai_client = ZhipuAiClient(
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"],
+            )
+        except TypeError:
+            # 旧版 SDK 不支持 base_url 参数，回退到纯 api_key
+            _zai_client = ZhipuAiClient(api_key=cfg["api_key"])
+
     return _zai_client
 
 
