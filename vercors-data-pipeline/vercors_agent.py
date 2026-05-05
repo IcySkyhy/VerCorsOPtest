@@ -2,13 +2,14 @@
 """
 VerCors 数据采集 Agent — ProofWright 风格自动注释生成与验证闭环。
 
-用 DeepSeek v4 Pro 作为 Teacher 模型，对无注释的 C 代码自动添加 VerCors 契约注释，
-通过「生成 → 验证 → 报错反馈 → 修正」的多轮循环，采集成功的训练轨迹。
+支持多模型（DeepSeek / GLM-5.1）对比，跨模型自动回退。
 
 用法：
-    python vercors_agent.py                    # 处理 corpus/ 下所有 .c 文件
-    python vercors_agent.py --file foo.c       # 只处理指定文件
-    python vercors_agent.py --resume            # 跳过已有轨迹的文件
+    python vercors_agent.py                        # corpus/ 下所有 .c，默认模型
+    python vercors_agent.py --file foo.c           # 单个文件
+    python vercors_agent.py --model glm             # 使用 GLM-5.1
+    python vercors_agent.py --model deepseek --fallback glm  # 主+回退
+    python vercors_agent.py --resume                # 断点续传
 """
 
 import argparse
@@ -23,9 +24,8 @@ import traceback
 from datetime import datetime
 from typing import Optional
 
-from openai import OpenAI
-
 import config
+from llm_client import call_llm, call_llm_with_fallback, extract_c_code
 
 # ============================================================
 # 日志设置
@@ -57,65 +57,6 @@ def load_prompt(name: str) -> str:
 SYSTEM_PROMPT = load_prompt("system_prompt.txt")
 ANNOTATE_USER_TEMPLATE = load_prompt("annotate_user.txt")
 FEEDBACK_USER_TEMPLATE = load_prompt("feedback_user.txt")
-
-
-# ============================================================
-# DeepSeek API 客户端
-# ============================================================
-_client: Optional[OpenAI] = None
-
-
-def get_client() -> OpenAI:
-    """懒加载 DeepSeek API 客户端。"""
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=config.DEEPSEEK_API_KEY,
-            base_url=config.DEEPSEEK_BASE_URL,
-            timeout=config.API_TIMEOUT,
-        )
-    return _client
-
-
-def call_deepseek(
-    messages: list[dict],
-    model: str = config.DEEPSEEK_MODEL,
-    temperature: float = config.API_TEMPERATURE,
-    max_tokens: int = config.API_MAX_TOKENS,
-) -> str:
-    """调用 DeepSeek API，返回模型回复文本。"""
-    client = get_client()
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return response.choices[0].message.content
-
-
-def extract_c_code(llm_output: str) -> str:
-    """从 LLM 输出中提取 C 代码（兼容多种格式）。"""
-    # 策略 1：匹配 ```c ... ``` 代码块
-    pattern = r"```c\s*\n(.*?)```"
-    match = re.search(pattern, llm_output, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-
-    # 策略 2：匹配 ``` ... ``` 无语言标记
-    pattern = r"```\s*\n(.*?)```"
-    match = re.search(pattern, llm_output, re.DOTALL)
-    if match:
-        code = match.group(1).strip()
-        # 启发式判断：包含 /*@ 则认为是 C 代码
-        if "/*@" in code or "int " in code or "void " in code:
-            return code
-
-    # 策略 3：直接返回整个输出（希望 LLM 只输出了代码）
-    if "/*@" in llm_output:
-        return llm_output.strip()
-
-    raise ValueError("无法从 LLM 输出中提取 C 代码块")
 
 
 # ============================================================
@@ -185,17 +126,31 @@ def extract_errors(output: str) -> str:
 # ============================================================
 # 核心 Agent 循环：单文件处理
 # ============================================================
-def process_file(clean_file_path: str) -> Optional[dict]:
+def process_file(
+    clean_file_path: str,
+    model_name: str = None,
+    fallback_model: str = None,
+    enable_cross_model: bool = True,
+) -> Optional[dict]:
     """
     对单个干净 C 文件执行多轮注释生成 + 验证循环。
+
+    Args:
+        clean_file_path: 干净 C 文件路径
+        model_name: 主模型名
+        fallback_model: 备选模型名（跨模型回退时使用）
+        enable_cross_model: 主模型失败后是否启用跨模型回退
 
     返回：
         成功 → 轨迹字典（直接可写入 JSONL）
         失败 → None
     """
+    model_name = model_name or config.DEFAULT_MODEL
     file_id = os.path.splitext(os.path.basename(clean_file_path))[0]
     logger.info(f"\n{'='*60}")
-    logger.info(f"处理文件: {file_id}")
+    logger.info(f"处理文件: {file_id}  |  模型: {model_name}")
+    if fallback_model:
+        logger.info(f"  跨模型回退: {fallback_model}")
     logger.info(f"{'='*60}")
 
     # 读取干净代码
@@ -211,30 +166,42 @@ def process_file(clean_file_path: str) -> Optional[dict]:
     user_prompt = ANNOTATE_USER_TEMPLATE.replace("{clean_code}", clean_code)
     messages.append({"role": "user", "content": user_prompt})
 
-    for round_num in range(1, config.MAX_RETRIES + 1):
-        logger.info(f"  ── Round {round_num}/{config.MAX_RETRIES} ──")
+    current_model = model_name
+    total_retries = config.MAX_RETRIES
 
-        # 调用 DeepSeek
+    for round_num in range(1, total_retries + 1):
+        logger.info(f"  ── Round {round_num}/{total_retries} [{current_model}] ──")
+
+        # 调用 LLM（支持跨模型回退）
+        used_model = current_model
         try:
-            llm_response = call_deepseek(messages)
+            if config.CROSS_MODEL_FALLBACK and enable_cross_model and fallback_model:
+                llm_response, used_model = call_llm_with_fallback(
+                    messages, current_model, fallback_model
+                )
+            else:
+                llm_response = call_llm(messages, current_model)
+                used_model = current_model
         except Exception as e:
-            logger.error(f"  DeepSeek API 调用失败: {e}")
-            # API 错误视为本轮失败，但如果还有重试机会就继续
+            logger.error(f"  所有模型调用均失败: {e}")
             trajectory_rounds.append({
                 "round": round_num,
+                "model": current_model,
                 "llm_raw_response": f"API_ERROR: {e}",
                 "annotated_code": "",
                 "vercors_output": str(e),
                 "passed": False,
             })
+            if config.CROSS_MODEL_FALLBACK and enable_cross_model and fallback_model:
+                # 切换到备选模型继续
+                current_model = fallback_model
             continue
 
         # 提取代码
         try:
             annotated_code = extract_c_code(llm_response)
-        except ValueError as e:
-            logger.warning(f"  代码提取失败: {e}")
-            # 将整个响应当作代码试试
+        except ValueError:
+            logger.warning("  代码提取失败，使用原始响应")
             annotated_code = llm_response.strip()
 
         # 写入临时文件
@@ -248,9 +215,10 @@ def process_file(clean_file_path: str) -> Optional[dict]:
         # 调用 VerCors 验证
         passed, vercors_output = run_vercors(temp_file)
 
-        # 记录本轮到轨迹
+        # 记录本轮
         round_record = {
             "round": round_num,
+            "model": used_model,
             "llm_raw_response": llm_response,
             "annotated_code": annotated_code,
             "vercors_output": vercors_output,
@@ -259,19 +227,20 @@ def process_file(clean_file_path: str) -> Optional[dict]:
         trajectory_rounds.append(round_record)
 
         if passed:
-            logger.info(f"  ✅ 验证通过！总轮数: {round_num}")
+            logger.info(f"  ✅ 验证通过！模型: {used_model}, 轮数: {round_num}")
             return {
                 "id": file_id,
                 "original_code": clean_code,
                 "final_annotated_code": annotated_code,
                 "final_vercors_output": vercors_output,
                 "total_rounds": round_num,
+                "model": used_model,
                 "trajectory": trajectory_rounds,
                 "timestamp": datetime.now().isoformat(),
             }
 
-        # 验证失败：构造反馈消息
-        logger.info(f"  ❌ 验证失败，准备反馈...")
+        # 验证失败：构造反馈
+        logger.info(f"  ❌ 验证失败 [{used_model}]，准备反馈...")
         errors = extract_errors(vercors_output)
         feedback_prompt = (
             FEEDBACK_USER_TEMPLATE
@@ -281,23 +250,35 @@ def process_file(clean_file_path: str) -> Optional[dict]:
         messages.append({"role": "assistant", "content": llm_response})
         messages.append({"role": "user", "content": feedback_prompt})
 
-        # 控制消息长度，防止超出上下文窗口（DeepSeek 上下文 128K，保守截断）
+        # 消息长度控制
         if len(messages) > 12:
-            # 保留 system + 最近 6 轮（12 条消息）
             messages = [messages[0]] + messages[-11:]
 
     # 所有重试耗尽
-    logger.warning(f"  💀 超过最大重试次数 ({config.MAX_RETRIES})，标记为失败")
+    # 如果主模型失败且启用了跨模型回退，尝试用备选模型独立重试
+    if (config.CROSS_MODEL_FALLBACK and enable_cross_model
+            and fallback_model and current_model != fallback_model):
+        logger.info(f"  🔄 主模型 {model_name} 全部失败，切换到备选 {fallback_model}")
+        return process_file(
+            clean_file_path,
+            model_name=fallback_model,
+            fallback_model=None,  # 防止无限递归
+            enable_cross_model=False,
+        )
+
+    logger.warning(f"  💀 超过最大重试次数，标记为失败")
     return None
 
 
 # ============================================================
 # 批量处理入口
 # ============================================================
-def save_trajectory(trajectory: dict) -> None:
-    """将一条成功轨迹追加到 JSONL 文件。"""
+def save_trajectory(trajectory: dict, model_name: str = None) -> None:
+    """将一条成功轨迹追加到 JSONL 文件（按模型分文件）。"""
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    with open(config.TRAJECTORIES_FILE, "a", encoding="utf-8") as f:
+    model_key = model_name or trajectory.get("model", config.DEFAULT_MODEL)
+    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{model_key}.jsonl")
+    with open(out_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(trajectory, ensure_ascii=False) + "\n")
 
 
@@ -316,12 +297,14 @@ def save_failed(file_id: str, clean_code: str, trajectory: list) -> None:
     logger.info(f"  失败案例已保存: {fail_file}")
 
 
-def get_completed_ids() -> set:
+def get_completed_ids(model_name: str = None) -> set:
     """读取已有轨迹文件，返回已完成的 file id 集合（支持断点续传）。"""
-    if not os.path.exists(config.TRAJECTORIES_FILE):
+    model_key = model_name or config.DEFAULT_MODEL
+    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{model_key}.jsonl")
+    if not os.path.exists(out_file):
         return set()
     completed = set()
-    with open(config.TRAJECTORIES_FILE, "r", encoding="utf-8") as f:
+    with open(out_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -336,19 +319,38 @@ def get_completed_ids() -> set:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="VerCors 数据采集 Agent — DeepSeek 驱动"
+        description="VerCors 数据采集 Agent — 多模型支持"
+    )
+    parser.add_argument("--file", type=str, default=None, help="只处理指定的 .c 文件")
+    parser.add_argument("--resume", action="store_true", help="跳过已有成功轨迹的文件")
+    parser.add_argument(
+        "--model", type=str, default=None,
+        help=f"使用的模型，可用: {list(config.MODEL_REGISTRY.keys())}"
     )
     parser.add_argument(
-        "--file", type=str, default=None, help="只处理指定的 .c 文件"
+        "--fallback", type=str, default=None,
+        help="备选模型（主模型失败时回退）"
     )
     parser.add_argument(
-        "--resume", action="store_true", help="跳过已有成功轨迹的文件"
+        "--no-fallback", action="store_true",
+        help="禁用跨模型回退"
     )
     args = parser.parse_args()
 
+    model_name = args.model or config.DEFAULT_MODEL
+    fallback_model = args.fallback
+    # 自动确定备选模型
+    if not args.no_fallback and fallback_model is None:
+        available = list(config.MODEL_REGISTRY.keys())
+        if len(available) > 1:
+            fb = [m for m in available if m != model_name]
+            if fb:
+                fallback_model = fb[0]
+
     # 检查 API Key
-    if config.DEEPSEEK_API_KEY == "sk-your-api-key-here":
-        logger.error("请先设置 DEEPSEEK_API_KEY 环境变量或修改 config.py")
+    cfg = config.get_model_config(model_name)
+    if cfg.get("api_key", "").startswith("sk-your-"):
+        logger.error(f"请先设置 {model_name.upper()}_API_KEY 环境变量或修改 .env")
         sys.exit(1)
 
     # 确保目录存在
@@ -370,28 +372,34 @@ def main() -> None:
 
     # 断点续传
     if args.resume:
-        completed = get_completed_ids()
+        completed = get_completed_ids(model_name)
         files = [f for f in files if os.path.splitext(os.path.basename(f))[0] not in completed]
-        logger.info(f"断点续传模式：跳过 {len(completed)} 个已完成，剩余 {len(files)} 个待处理")
+        logger.info(f"断点续传：跳过 {len(completed)} 个已完成，剩余 {len(files)} 个")
         if not files:
-            logger.info("所有文件已处理完毕，无需继续")
+            logger.info("所有文件已处理完毕")
             return
 
     logger.info(f"准备处理 {len(files)} 个文件")
-    logger.info(f"语料目录: {config.CORPUS_DIR}")
-    logger.info(f"输出目录: {config.OUTPUT_DIR}")
-    logger.info(f"模型: {config.DEEPSEEK_MODEL}")
-    logger.info(f"最大重试轮数: {config.MAX_RETRIES}")
+    logger.info(f"主模型: {model_name} ({cfg['model']})")
+    if fallback_model:
+        fb_cfg = config.get_model_config(fallback_model)
+        logger.info(f"回退模型: {fallback_model} ({fb_cfg['model']})")
+    logger.info(f"最大重试: {config.MAX_RETRIES} 轮")
+    logger.info(f"跨模型回退: {'启用' if config.CROSS_MODEL_FALLBACK and not args.no_fallback else '禁用'}")
 
-    # 统计
-    stats = {"total": len(files), "passed": 0, "failed": 0, "total_rounds": 0}
+    stats = {"total": len(files), "passed": 0, "failed": 0, "total_rounds": 0, "model": model_name}
 
     for i, file_path in enumerate(files, 1):
         file_id = os.path.splitext(os.path.basename(file_path))[0]
         logger.info(f"\n[{i}/{len(files)}] {file_id}")
 
         try:
-            trajectory = process_file(file_path)
+            trajectory = process_file(
+                file_path,
+                model_name=model_name,
+                fallback_model=fallback_model,
+                enable_cross_model=not args.no_fallback,
+            )
         except Exception as e:
             logger.error(f"  处理异常: {e}")
             logger.error(traceback.format_exc())
@@ -399,34 +407,31 @@ def main() -> None:
             continue
 
         if trajectory:
-            save_trajectory(trajectory)
+            save_trajectory(trajectory, model_name)
             stats["passed"] += 1
             stats["total_rounds"] += trajectory["total_rounds"]
         else:
-            # 读取原始代码以保存失败案例
             with open(file_path, "r", encoding="utf-8") as f:
                 clean_code = f.read()
             save_failed(file_id, clean_code, [])
             stats["failed"] += 1
 
-        # 实时统计
         avg_rounds = stats["total_rounds"] / stats["passed"] if stats["passed"] > 0 else 0
-        logger.info(f"  📊 当前统计: 通过 {stats['passed']}, 失败 {stats['failed']}, "
-                     f"平均轮数 {avg_rounds:.1f}")
+        logger.info(f"  📊 通过 {stats['passed']}, 失败 {stats['failed']}, 平均轮数 {avg_rounds:.1f}")
 
-    # ── 最终报告 ──
+    # 最终报告
     logger.info(f"\n{'='*60}")
-    logger.info("最终统计")
+    logger.info(f"最终统计 [{model_name}]")
     logger.info(f"{'='*60}")
     logger.info(f"  总计:   {stats['total']}")
     logger.info(f"  通过:   {stats['passed']} ({stats['passed']/stats['total']*100:.1f}%)")
     logger.info(f"  失败:   {stats['failed']} ({stats['failed']/stats['total']*100:.1f}%)")
     if stats["passed"] > 0:
         logger.info(f"  平均轮数: {stats['total_rounds']/stats['passed']:.1f}")
-    logger.info(f"  轨迹文件: {config.TRAJECTORIES_FILE}")
+    logger.info(f"  轨迹文件: output/trajectories_{model_name}.jsonl")
 
-    # 保存统计
-    with open(config.STATS_FILE, "w", encoding="utf-8") as f:
+    stats_out = os.path.join(config.OUTPUT_DIR, f"stats_{model_name}.json")
+    with open(stats_out, "w", encoding="utf-8") as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
 

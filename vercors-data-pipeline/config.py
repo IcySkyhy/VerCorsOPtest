@@ -1,6 +1,6 @@
 """
 VerCors 数据采集 Agent — 配置文件
-部署到服务器后，修改 DEEPSEEK_API_KEY 和路径即可运行。
+支持 DeepSeek / GLM 多模型对比，以及大规模语料自动合成。
 """
 
 import os
@@ -11,51 +11,120 @@ try:
     _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     load_dotenv(_env_path)
 except ImportError:
-    # python-dotenv 未安装时静默跳过，依赖系统环境变量
     pass
 
 # ============================================================
-# DeepSeek API 配置（兼容 openai 库）
+# 模型注册表
 # ============================================================
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-your-api-key-here")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"          # DeepSeek v4 Pro
+#   - DeepSeek:  openai 兼容接口，pip install openai
+#   - GLM:      zai-sdk 专用接口，pip install zai-sdk
+# ============================================================
+MODEL_REGISTRY = {
+    "deepseek": {
+        "provider": "openai",                # 使用 openai 兼容客户端
+        "api_key": os.environ.get("DEEPSEEK_API_KEY", "sk-your-api-key-here"),
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "timeout": 120,
+    },
+    "glm": {
+        "provider": "zai",                   # 使用 zai-sdk 客户端
+        "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "model": "glm-5.1",
+        "temperature": 0.3,
+        "max_tokens": 65536,                 # GLM-5.1 最大输出 128K
+        "timeout": 120,
+        # GLM-5.1 深度思考（编码任务建议开启）
+        "thinking": {"type": "enabled"},
+    },
+}
 
-# API 调用参数
-API_TEMPERATURE = 0.3                     # 代码生成建议低温度
-API_MAX_TOKENS = 4096
-API_TIMEOUT = 120                          # 单次 API 调用超时（秒）
+# ── 默认使用的模型（可通过 --model 命令行覆盖）──
+DEFAULT_MODEL = os.environ.get("VERCORS_AGENT_MODEL", "deepseek")
+
+# ── 跨模型回退：主模型失败后，尝试用备选模型 ──
+CROSS_MODEL_FALLBACK = True          # 是否启用跨模型回退
+FALLBACK_RETRIES = 5                 # 回退到备选模型后的最大重试轮数
+
+# ── 兼容旧版调用（单模型模式）──
+def get_model_config(name: str = None) -> dict:
+    """获取指定模型的配置字典。"""
+    key = name or DEFAULT_MODEL
+    if key not in MODEL_REGISTRY:
+        raise ValueError(f"未知模型: {key}，可用: {list(MODEL_REGISTRY.keys())}")
+    return MODEL_REGISTRY[key]
+
+# 向后兼容别名
+_ds = MODEL_REGISTRY["deepseek"]
+DEEPSEEK_API_KEY = _ds["api_key"]
+DEEPSEEK_BASE_URL = _ds["base_url"]
+DEEPSEEK_MODEL = _ds["model"]
+API_TEMPERATURE = _ds["temperature"]
+API_MAX_TOKENS = _ds["max_tokens"]
+API_TIMEOUT = _ds["timeout"]
 
 # ============================================================
 # VerCors 工具路径（服务器上的绝对路径）
 # ============================================================
 TEST_OP_SH = "/workspace/I/qimeng5/huyan/VerCorsOPtest/test_op.sh"
 VERCORS_BIN = "/workspace/I/qimeng5/huyan/download/usr/share/vercors/vercors"
-
-# VerCors 验证超时（秒），防止 SMT 求解器卡死
 VERCORS_TIMEOUT = 120
 
 # ============================================================
 # Agent 循环参数
 # ============================================================
-MAX_RETRIES = 5            # 最大重试轮数（首轮 + 4 次反馈修正）
-TEMP_DIR = "temp"          # 临时文件目录（存放每轮生成的 .c 文件）
+MAX_RETRIES = 10           # 单模型最大重试轮数
 
 # ============================================================
 # 路径配置
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CORPUS_DIR = os.path.join(BASE_DIR, "corpus")       # 干净 C 代码库存放处
+CORPUS_DIR = os.path.join(BASE_DIR, "corpus")       # 干净 C 代码库
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")     # Prompt 模板
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")       # 成功轨迹输出
-FAILED_DIR = os.path.join(BASE_DIR, "failed")        # 失败案例
-TEMP_DIR = os.path.join(BASE_DIR, TEMP_DIR)
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")       # 成功轨迹
+FAILED_DIR = os.path.join(BASE_DIR, "failed")       # 失败案例
+TEMP_DIR = os.path.join(BASE_DIR, "temp")           # 临时文件
 
 # ============================================================
-# 输出文件
+# 输出文件（模型隔离，便于对比）
 # ============================================================
-TRAJECTORIES_FILE = os.path.join(OUTPUT_DIR, "trajectories.jsonl")   # 训练数据
-STATS_FILE = os.path.join(OUTPUT_DIR, "stats.json")                  # 统计信息
+def _trajectory_file(model_name: str) -> str:
+    return os.path.join(OUTPUT_DIR, f"trajectories_{model_name}.jsonl")
+
+def _stats_file(model_name: str) -> str:
+    return os.path.join(OUTPUT_DIR, f"stats_{model_name}.json")
+
+# 向后兼容
+TRAJECTORIES_FILE = os.path.join(OUTPUT_DIR, "trajectories.jsonl")
+STATS_FILE = os.path.join(OUTPUT_DIR, "stats.json")
+
+# ============================================================
+# 语料自动生成参数（扩展到万级数据）
+# ============================================================
+CODE_GEN_CONFIG = {
+    "target_count": 10000,                  # 目标语料总数
+    "gen_batch_size": 20,                   # 每批让 LLM 一次生成多少个函数
+    "max_concurrent": 4,                    # 并发请求数
+    "templates_file": os.path.join(BASE_DIR, "prompts", "code_gen_templates.txt"),
+    # 代码生成使用的模型（建议用便宜的模型生成，用强的模型验证）
+    "gen_model": "deepseek",               # 生成候选代码的模型
+    "verify_model": "deepseek",            # 驱动 VerCors 验证的模型（可与 gen 不同）
+    # 多样性控制
+    "min_lines": 5,
+    "max_lines": 60,
+    "categories": [
+        "arithmetic",       # 纯计算
+        "array_readonly",   # 数组只读
+        "array_readwrite",  # 数组读写
+        "conditional",      # 条件分支
+        "nested_loop",      # 嵌套循环
+        "prefix_cumulative",# 前缀/累积
+        "multi_array",      # 多数组操作
+    ],
+}
 
 # ============================================================
 # 日志

@@ -4,12 +4,15 @@
 
 # 环境变量（含 API Key）
 .env
+*.env.local
+*.env.production
 
 # Python 缓存
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.pyc.bak
 
 # VerCors 验证输出日志
 *.out
@@ -20,6 +23,9 @@ output/
 failed/
 *.log
 
+# 语料生成产物（大规模生成后体积很大）
+corpus/gen_*.c
+
 # IDE 配置
 .vscode/
 .idea/
@@ -27,12 +33,16 @@ failed/
 *.swo
 *~
 
-# 操作系统杂项
-.DS_Store
-Thumbs.db
-desktop.ini
-
 # Python 虚拟环境
 venv/
 .venv/
 env/
+.conda/
+
+# pip
+pip-wheel-metadata/
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini

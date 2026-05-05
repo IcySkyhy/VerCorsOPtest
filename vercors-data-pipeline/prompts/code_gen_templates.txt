@@ -1,0 +1,87 @@
+以下是一些纯 C 函数的示例（不含任何注释），请模仿这种风格生成新函数。
+
+示例 1 — 纯计算：
+int add_one(int x) {
+    return x + 1;
+}
+
+示例 2 — 条件分支：
+int max_of_two(int a, int b) {
+    if (a > b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+示例 3 — 循环累加：
+int array_sum(int* arr, int len) {
+    int sum = 0;
+    for (int i = 0; i < len; i++) {
+        sum = sum + arr[i];
+    }
+    return sum;
+}
+
+示例 4 — 数组查找：
+int find_max(int* arr, int len) {
+    int max_val = arr[0];
+    for (int i = 1; i < len; i++) {
+        if (arr[i] > max_val) {
+            max_val = arr[i];
+        }
+    }
+    return max_val;
+}
+
+示例 5 — 数组写入：
+void fill_array(int* arr, int len, int value) {
+    for (int i = 0; i < len; i++) {
+        arr[i] = value;
+    }
+}
+
+示例 6 — 双数组：
+void array_copy(int* src, int* dst, int len) {
+    for (int i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+}
+
+示例 7 — 数组统计：
+int count_positive(int* arr, int len) {
+    int count = 0;
+    for (int i = 0; i < len; i++) {
+        if (arr[i] > 0) {
+            count = count + 1;
+        }
+    }
+    return count;
+}
+
+示例 8 — 嵌套循环：
+void matrix_add(int** a, int** b, int** c, int rows, int cols) {
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            c[i][j] = a[i][j] + b[i][j];
+        }
+    }
+}
+
+示例 9 — 前缀/累积：
+void running_sum(int* arr, int len) {
+    for (int i = 1; i < len; i++) {
+        arr[i] = arr[i] + arr[i - 1];
+    }
+}
+
+示例 10 — 多条件分支：
+int clamp_value(int x, int lo, int hi) {
+    if (x < lo) {
+        return lo;
+    } else if (x > hi) {
+        return hi;
+    } else {
+        return x;
+    }
+}
