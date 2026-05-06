@@ -34,18 +34,6 @@ MODEL_REGISTRY = {
             "reasoning_effort": "high",
         },
     },
-    # "glm": {
-    #     "provider": "zai",                   # 使用 zai-sdk 客户端
-    #     "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
-    #     "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-    #     "model": "glm-5.1",
-    #     "temperature": 0.3,
-    #     "max_tokens": 65536,                 # GLM-5.1 最大输出 128K
-    #     "timeout": 120,
-    #     # GLM-5.1 深度思考（编码任务建议开启）
-    #     "thinking": {"type": "enabled"},
-    # },
-    # 备选：如果 zai-sdk URL 有问题，用 openai 兼容路径直连 coding 端点
     "glm-openai": {
         "provider": "openai",
         "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
@@ -72,8 +60,8 @@ MODEL_REGISTRY = {
 DEFAULT_MODEL = os.environ.get("VERCORS_AGENT_MODEL", "deepseek")
 
 # ── 跨模型回退：主模型失败后，尝试用备选模型 ──
-CROSS_MODEL_FALLBACK = False          # 是否启用跨模型回退
-FALLBACK_RETRIES = 5                 # 回退到备选模型后的最大重试轮数
+CROSS_MODEL_FALLBACK = True          # 是否启用跨模型回退
+FALLBACK_RETRIES = 10                 # 回退到备选模型后的最大重试轮数
 
 # ── 兼容旧版调用（单模型模式）──
 def get_model_config(name: str = None) -> dict:

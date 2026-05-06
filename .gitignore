@@ -26,7 +26,8 @@ failed/
 
 # 语料生成产物（大规模生成后体积很大）
 corpus/gen_*.c
-
+gen_*.c
+vercors-data-pipeline/corpus/gen_*.c
 # IDE 配置
 .vscode/
 .idea/
