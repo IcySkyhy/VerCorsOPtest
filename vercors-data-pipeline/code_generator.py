@@ -214,10 +214,15 @@ def generate_corpus(
 
     # 统计已有文件
     existing_files = set()
+    gen_counter_offset = 0          # 已有的最大 gen 编号，新文件从 offset+1 开始
     if os.path.isdir(config.CORPUS_DIR):
         existing_files = set(
             f for f in os.listdir(config.CORPUS_DIR) if f.endswith(".c")
         )
+        for fname in existing_files:
+            m = re.match(r'gen_(\d+)\.c', fname)
+            if m:
+                gen_counter_offset = max(gen_counter_offset, int(m.group(1)))
     existing_hashes = set()
     for fname in existing_files:
         fpath = os.path.join(config.CORPUS_DIR, fname)
@@ -292,7 +297,8 @@ def generate_corpus(
                     continue
 
                 existing_hashes.add(h)
-                safe_name = f"gen_{total_generated + 1:05d}.c"
+                counter = gen_counter_offset + total_generated + 1
+                safe_name = f"gen_{counter:05d}.c"
                 file_path = os.path.join(config.CORPUS_DIR, safe_name)
                 if not dry_run:
                     with open(file_path, "w", encoding="utf-8") as f:
