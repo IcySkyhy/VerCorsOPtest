@@ -131,7 +131,8 @@ def process_file(
     clean_file_path: str,
     model_name: str = None,
     fallback_model: str = None,
-    enable_cross_model: bool = False
+    enable_cross_model: bool = True,
+    lang: str = "c",
 ) -> Optional[dict]:
     """
     对单个干净 C 文件执行多轮注释生成 + 验证循环。
@@ -231,11 +232,13 @@ def process_file(
             logger.info(f"验证通过！模型: {used_model}, 轮数: {round_num}")
             return {
                 "id": file_id,
+                "lang": lang,
+                "model": model_name,           # 用户选的主模型 key（如 "glm-openai"）
+                "actual_model": used_model,     # 实际成功的模型（可能与 model_name 不同）
                 "original_code": clean_code,
                 "final_annotated_code": annotated_code,
                 "final_vercors_output": vercors_output,
                 "total_rounds": round_num,
-                "model": used_model,
                 "trajectory": trajectory_rounds,
                 "timestamp": datetime.now().isoformat(),
             }
@@ -263,8 +266,9 @@ def process_file(
         return process_file(
             clean_file_path,
             model_name=fallback_model,
-            fallback_model=None,  # 防止无限递归
+            fallback_model=None,
             enable_cross_model=False,
+            lang=lang,
         )
 
     logger.warning(f"超过最大重试次数，标记为失败")
@@ -299,22 +303,31 @@ def save_failed(file_id: str, clean_code: str, trajectory: list) -> None:
 
 
 def get_completed_ids(model_name: str = None, lang: str = "c") -> set:
-    """读取已有轨迹文件，返回已完成的 file id 集合（支持断点续传）。"""
+    """读取已有轨迹文件，返回已完成的 file id 集合（兼容新旧命名）。"""
     model_key = model_name or config.DEFAULT_MODEL
-    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_{model_key}.jsonl")
-    if not os.path.exists(out_file):
-        return set()
+    # 新命名: trajectories_{lang}_{model}.jsonl  旧命名: trajectories_{model}.jsonl
+    candidates = [
+        os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_{model_key}.jsonl"),
+        os.path.join(config.OUTPUT_DIR, f"trajectories_{model_key}.jsonl"),
+        # 也检查反向语言（如果旧文件按旧格式存了 CUDA 数据但没有 lang 标记）
+    ]
     completed = set()
-    with open(out_file, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-                completed.add(record.get("id", ""))
-            except json.JSONDecodeError:
-                continue
+    for out_file in candidates:
+        if not os.path.exists(out_file):
+            continue
+        with open(out_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    completed.add(record.get("id", ""))
+                except json.JSONDecodeError:
+                    continue
+    if completed:
+        logger.info(f"  从已有轨迹加载了 {len(completed)} 个已完成 id "
+                     f"(模型={model_key}, 语言={lang})")
     return completed
 
 
@@ -430,6 +443,7 @@ def main() -> None:
                 model_name=model_name,
                 fallback_model=fallback_model,
                 enable_cross_model=not args.no_fallback,
+                lang=lang,
             )
         except Exception as e:
             logger.error(f"  处理异常: {e}")

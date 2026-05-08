@@ -199,12 +199,24 @@ def _extract_c_functions(block: str) -> list[str]:
 
 def _extract_cuda_kernels(block: str) -> list[str]:
     funcs = []
-    func_match = re.search(
-        r'__global__\s+void\s+\w+\s*\([^)]*\)\s*\{.*?\n\}',
-        block, re.DOTALL,
-    )
-    if func_match:
-        funcs.append(func_match.group(0).strip())
+    # 策略 1: 用 __global__ 作为锚点，贪婪匹配到 block 末尾的最后一个 }
+    # 因为 CUDA kernel 内部有嵌套 {}（if/for），惰性匹配会提前截断
+    m = re.search(r'__global__\s+void\s+\w+\s*\([^)]*\)\s*\{', block)
+    if m:
+        start = m.start()
+        # 从 { 之后找配对的 }
+        brace_start = m.end() - 1  # 指向 {
+        depth = 0
+        end = brace_start
+        for i in range(brace_start, len(block)):
+            if block[i] == '{':
+                depth += 1
+            elif block[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        funcs.append(block[start:end].strip())
     elif re.search(r'__global__|threadIdx|blockIdx', block):
         cleaned = re.sub(r'^#+\s*\w+\s*\n?', '', block).strip()
         if cleaned:
@@ -327,26 +339,38 @@ def generate_corpus(
             functions = _extract_functions(llm_output, lang)
             logger.info(f"    提取到 {len(functions)} 个候选")
 
+            accepted = 0
+            rejected_lines = 0
+            rejected_comment = 0
+            rejected_dup = 0
+            rejected_kw = 0
+            rejected_syntax = 0
+
             for func in functions:
                 if total_generated >= needed:
                     break
 
                 lines = func.strip().split("\n")
                 if len(lines) < cfg["min_lines"] or len(lines) > cfg["max_lines"]:
+                    rejected_lines += 1
                     continue
                 if "/*@" in func or "//" in func:
+                    rejected_comment += 1
                     continue
 
                 h = _code_hash(func)
                 if h in existing_hashes:
+                    rejected_dup += 1
                     continue
 
                 if lang == "cuda":
                     if not re.search(CUDA_KEYWORDS, func):
-                        continue  # 不含 CUDA 关键字，跳过
+                        rejected_kw += 1
+                        continue
 
                 ok, err = _syntax_check(func, lang)
                 if not ok:
+                    rejected_syntax += 1
                     logger.debug(f"    语法错误: {err[:80]}")
                     continue
 
@@ -358,6 +382,12 @@ def generate_corpus(
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(func)
                 total_generated += 1
+                accepted += 1
+
+            if accepted == 0:
+                logger.warning(f"    全部 {len(functions)} 个被拒绝: "
+                               f"行数={rejected_lines} 注释={rejected_comment} "
+                               f"重复={rejected_dup} 关键字={rejected_kw} 语法={rejected_syntax}")
 
         logger.info(f"  本轮结束，累计: {total_generated}/{needed}")
 
