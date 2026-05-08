@@ -279,8 +279,13 @@ def process_file(
 # 批量处理入口
 # ============================================================
 def save_trajectory(trajectory: dict, model_name: str = None, lang: str = "c") -> None:
-    """将一条成功轨迹追加到统一 total 文件。"""
+    """将一条成功轨迹追加到统一 total 文件，确保 model/lang 字段完整。"""
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+    # 确保顶层有 model 和 lang（兼容旧数据）
+    if "model" not in trajectory:
+        trajectory["model"] = model_name or config.DEFAULT_MODEL
+    if "lang" not in trajectory:
+        trajectory["lang"] = lang
     out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_total.jsonl")
     with open(out_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(trajectory, ensure_ascii=False) + "\n")

@@ -149,8 +149,8 @@ def _nvcc_check(code: str) -> tuple[bool, str]:
     full = f'extern "C" {{\n{code}\n}}'
     try:
         result = subprocess.run(
-            ["nvcc", "--cuda", "-fsyntax-only", "-o", os.devnull, "-"],
-            input=full, capture_output=True, text=True, timeout=10,
+            ["nvcc", "--cuda", "-c", "-o", os.devnull, "-"],
+            input=full, capture_output=True, text=True, timeout=15,
         )
         return result.returncode == 0, result.stderr
     except FileNotFoundError:
@@ -345,6 +345,7 @@ def generate_corpus(
             rejected_dup = 0
             rejected_kw = 0
             rejected_syntax = 0
+            _first_syntax_err = None
 
             for func in functions:
                 if total_generated >= needed:
@@ -371,7 +372,8 @@ def generate_corpus(
                 ok, err = _syntax_check(func, lang)
                 if not ok:
                     rejected_syntax += 1
-                    logger.debug(f"    语法错误: {err[:80]}")
+                    if _first_syntax_err is None and err and "skipping" not in err.lower():
+                        _first_syntax_err = (func[:120], err[:200])
                     continue
 
                 existing_hashes.add(h)
@@ -388,6 +390,9 @@ def generate_corpus(
                 logger.warning(f"    全部 {len(functions)} 个被拒绝: "
                                f"行数={rejected_lines} 注释={rejected_comment} "
                                f"重复={rejected_dup} 关键字={rejected_kw} 语法={rejected_syntax}")
+                if _first_syntax_err:
+                    logger.warning(f"    首个语法错误 → 代码: {_first_syntax_err[0]}")
+                    logger.warning(f"                    错误: {_first_syntax_err[1][:300]}")
 
         logger.info(f"  本轮结束，累计: {total_generated}/{needed}")
 
