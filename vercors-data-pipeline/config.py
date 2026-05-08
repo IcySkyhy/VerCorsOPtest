@@ -61,7 +61,7 @@ DEFAULT_MODEL = os.environ.get("VERCORS_AGENT_MODEL", "deepseek")
 
 # ── 跨模型回退：主模型失败后，尝试用备选模型 ──
 CROSS_MODEL_FALLBACK = True          # 是否启用跨模型回退
-FALLBACK_RETRIES = 10                 # 回退到备选模型后的最大重试轮数
+FALLBACK_RETRIES = 5                 # 回退到备选模型后的最大重试轮数
 
 # ── 兼容旧版调用（单模型模式）──
 def get_model_config(name: str = None) -> dict:
@@ -92,6 +92,12 @@ VERCORS_TIMEOUT = 120
 # ============================================================
 MAX_RETRIES = 10            # 最大重试轮数
 
+<<<<<<< HEAD
+=======
+MAX_RETRIES = 10            # 最大重试轮数（首轮 + 9 次反馈修正）
+TEMP_DIR = "temp"    
+     
+>>>>>>> 169b4f2 (apply modifications)
 # ============================================================
 # 路径配置
 # ============================================================
