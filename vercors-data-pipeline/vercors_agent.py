@@ -356,11 +356,12 @@ def main() -> None:
         logger.error(f"请先设置 {model_name.upper()}_API_KEY 环境变量或修改 .env")
         sys.exit(1)
 
-    # 确保目录存在
-    for d in [config.OUTPUT_DIR, config.FAILED_DIR, config.TEMP_DIR]:
+    # 确保所有输出目录存在（包括 corpus 子目录）
+    for d in [config.OUTPUT_DIR, config.FAILED_DIR, config.TEMP_DIR,
+              config.CORPUS_C_DIR, config.CORPUS_CUDA_DIR]:
         os.makedirs(d, exist_ok=True)
 
-    # 收集待处理文件（按 --lang 只扫描对应子目录）
+    # 收集待处理文件（按 --lang 只扫描对应子目录，有空则 fallback 到 corpus/ 根）
     if args.file:
         corpus_dir = config.CORPUS_CUDA_DIR if lang == "cuda" else config.CORPUS_C_DIR
         files = [args.file] if os.path.isabs(args.file) else [os.path.join(corpus_dir, args.file)]
@@ -371,16 +372,31 @@ def main() -> None:
         else:
             corpus_dir = config.CORPUS_C_DIR
             ext = ".c"
-        if os.path.isdir(corpus_dir):
-            files = sorted(
-                os.path.join(corpus_dir, f)
-                for f in os.listdir(corpus_dir)
-                if f.endswith(ext)
-            )
-        else:
-            files = []
+
+        files = sorted(
+            os.path.join(corpus_dir, f)
+            for f in os.listdir(corpus_dir)
+            if f.endswith(ext)
+        )
+
+        # 向后兼容：如果 corpus/c/ 为空但 corpus/ 根有遗留 .c 文件，扫描根目录
+        if not files and lang == "c":
+            parent_dir = config.CORPUS_DIR
+            if os.path.isdir(parent_dir):
+                legacy = sorted(
+                    os.path.join(parent_dir, f)
+                    for f in os.listdir(parent_dir)
+                    if f.endswith(".c")
+                )
+                if legacy:
+                    logger.warning(f"corpus/c/ 为空，发现 {len(legacy)} 个遗留文件在 corpus/ 根目录")
+                    logger.warning("建议: mv corpus/*.c corpus/c/")
+                    files = legacy
+                    corpus_dir = parent_dir
+
         if not files:
             logger.error(f"{corpus_dir} 中没有 {ext} 文件")
+            logger.error(f"请先运行: python code_generator.py --lang {lang} --count 500")
             sys.exit(1)
 
     logger.info(f"语料来源: {corpus_dir}")

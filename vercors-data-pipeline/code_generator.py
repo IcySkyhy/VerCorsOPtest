@@ -268,10 +268,22 @@ def generate_corpus(
         corpus_dir = config.CORPUS_CUDA_DIR
     else:
         corpus_dir = config.CORPUS_C_DIR
+    os.makedirs(corpus_dir, exist_ok=True)
 
-    # 扫描已有
+    # 扫描已有（优先扫描目标目录，再 fallback 到 corpus/ 根目录的遗留文件）
     existing_hashes, gen_counter_offset = _scan_existing(corpus_dir, ext)
-    existing_count = len([f for f in os.listdir(corpus_dir) if f.endswith(ext)]) if os.path.isdir(corpus_dir) else 0
+    existing_count = sum(1 for f in os.listdir(corpus_dir) if f.endswith(ext))
+
+    # 向后兼容：如果 corpus/c/ 为空但 corpus/ 根有遗留 gen_*.c
+    if existing_count == 0 and lang == "c":
+        parent_dir = config.CORPUS_DIR
+        if os.path.isdir(parent_dir):
+            parent_hashes, parent_counter = _scan_existing(parent_dir, ext)
+            if parent_counter > 0:
+                logger.warning(f"corpus/c/ 为空，发现 {parent_counter} 个遗留 gen_*.c 在 corpus/ 根")
+                logger.warning("新文件将写入 corpus/c/，建议: mv corpus/gen_*.c corpus/c/")
+                existing_hashes.update(parent_hashes)
+                gen_counter_offset = parent_counter
     needed = max(0, target_count - existing_count)
 
     if needed <= 0:
@@ -358,9 +370,8 @@ def generate_corpus(
 # ============================================================
 def deduplicate_corpus(lang: str = "c") -> int:
     corpus_dir = config.CORPUS_CUDA_DIR if lang == "cuda" else config.CORPUS_C_DIR
+    os.makedirs(corpus_dir, exist_ok=True)
     ext = LANG_EXT[lang]
-    if not os.path.isdir(corpus_dir):
-        return 0
 
     files = sorted(f for f in os.listdir(corpus_dir) if f.endswith(ext))
     seen = {}

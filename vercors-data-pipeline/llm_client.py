@@ -26,11 +26,12 @@ _zai_client = None  # GLM 专用 zai-sdk 客户端，懒加载
 
 
 def _get_openai_client(model_name: str) -> OpenAI:
-    """获取或创建 openai 兼容客户端（DeepSeek 等）。"""
+    """获取或创建 openai 兼容客户端（DeepSeek / GLM-openai / gpt-5.5 responses）。"""
     if model_name not in _openai_clients:
         cfg = config.get_model_config(model_name)
-        if cfg.get("provider") != "openai":
-            raise ValueError(f"模型 {model_name} 不是 openai 兼容接口")
+        provider = cfg.get("provider", "openai")
+        if provider not in ("openai", "responses"):
+            raise ValueError(f"模型 {model_name} 的 provider={provider} 不支持 openai 客户端")
         _openai_clients[model_name] = OpenAI(
             api_key=cfg["api_key"],
             base_url=cfg["base_url"],
@@ -100,18 +101,21 @@ def call_llm(
 
 
 def _call_responses(messages: list[dict], model_name: str, cfg: dict) -> str:
-    """通过 OpenAI Responses API 调用（如 gpt-5.5 代理）。"""
+    """通过 OpenAI Responses API 调用（如 gpt-5.5 代理），失败时回退到 Chat Completions。"""
     client = _get_openai_client(model_name)
-    # Responses API 用 input 而非 messages，但支持 messages 格式的列表
-    # 转换：messages → 单条 input 文本（Responses API 的输入方式）
-    input_text = _messages_to_text(messages)
-    response = client.responses.create(
-        model=cfg["model"],
-        input=input_text,
-        temperature=cfg["temperature"],
-        max_output_tokens=cfg["max_tokens"],
-    )
-    return response.output_text
+    # 尝试 Responses API
+    try:
+        response = client.responses.create(
+            model=cfg["model"],
+            input=_messages_to_text(messages),
+            temperature=cfg["temperature"],
+            max_output_tokens=cfg["max_tokens"],
+        )
+        return response.output_text
+    except Exception as e:
+        logger.warning(f"Responses API 调用失败 ({e})，回退到 Chat Completions")
+        # 许多代理实际只支持 /v1/chat/completions
+        return _call_openai(messages, model_name, cfg)
 
 
 def _messages_to_text(messages: list[dict]) -> str:
