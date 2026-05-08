@@ -145,14 +145,22 @@ def _gcc_check(code: str) -> tuple[bool, str]:
 
 
 def _nvcc_check(code: str) -> tuple[bool, str]:
-    """NVCC 语法检查 — 如果 NVCC 不可用则跳过。"""
+    """NVCC 语法检查 — 写入临时 .cu 文件再检查，避免 stdin 兼容问题。"""
+    import tempfile
     full = f'extern "C" {{\n{code}\n}}'
     try:
-        result = subprocess.run(
-            ["nvcc", "--cuda", "-c", "-o", os.devnull, "-"],
-            input=full, capture_output=True, text=True, timeout=15,
-        )
-        return result.returncode == 0, result.stderr
+        fd, tmpname = tempfile.mkstemp(suffix=".cu", prefix="vercors_gen_")
+        os.close(fd)
+        with open(tmpname, "w") as f:
+            f.write(full)
+        try:
+            result = subprocess.run(
+                ["nvcc", "--cuda", "-c", tmpname],
+                capture_output=True, text=True, timeout=15,
+            )
+            return result.returncode == 0, result.stderr
+        finally:
+            os.remove(tmpname)
     except FileNotFoundError:
         return True, "NVCC not available, skipping syntax check"
     except Exception as e:

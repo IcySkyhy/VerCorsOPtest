@@ -308,13 +308,9 @@ def save_failed(file_id: str, clean_code: str, trajectory: list) -> None:
 
 def get_completed_ids(model_name: str = None, lang: str = "c") -> set:
     """从 total 文件中读取已完成的 file id 集合。"""
-    candidates = [
-        os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_total.jsonl"),
-    ]
+    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_total.jsonl")
     completed = set()
-    for out_file in candidates:
-        if not os.path.exists(out_file):
-            continue
+    if os.path.exists(out_file):
         with open(out_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -326,7 +322,9 @@ def get_completed_ids(model_name: str = None, lang: str = "c") -> set:
                 except json.JSONDecodeError:
                     continue
     if completed:
-        logger.info(f"  从已有轨迹加载了 {len(completed)} 个已完成 id (语言={lang})")
+        logger.info(f"  断点续传: 从 {out_file} 加载了 {len(completed)} 个已完成 id (语言={lang})")
+    else:
+        logger.info(f"  断点续传: {out_file} 中没有已完成的记录")
     return completed
 
 
