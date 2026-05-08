@@ -16,6 +16,7 @@ __pycache__/
 
 # VerCors 验证输出日志
 *.out
+testlog/
 
 # Agent 运行时产物
 temp/

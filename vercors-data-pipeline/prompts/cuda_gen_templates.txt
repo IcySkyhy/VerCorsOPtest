@@ -1,0 +1,82 @@
+以下是一些纯 CUDA kernel 函数的示例（不含任何注释），请模仿这种风格生成新 kernel。
+
+示例 1 — 向量加（vector_add）：
+__global__ void vector_add(float* a, float* b, float* c, int N) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        c[tid] = a[tid] + b[tid];
+    }
+}
+
+示例 2 — 向量缩放（vector_scale）：
+__global__ void vector_scale(float* arr, int N, float scalar) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        arr[tid] = arr[tid] * scalar;
+    }
+}
+
+示例 3 — ReLU 激活（element_wise）：
+__global__ void relu(float* arr, int N) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        if (arr[tid] < 0.0f) {
+            arr[tid] = 0.0f;
+        }
+    }
+}
+
+示例 4 — 数组规约求和（reduction）：
+__global__ void reduce_sum(float* input, float* output, int N) {
+    extern __shared__ float sdata[];
+    int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    sdata[tid] = (i < N) ? input[i] : 0.0f;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        output[blockIdx.x] = sdata[0];
+    }
+}
+
+示例 5 — 数组拷贝（memory_ops）：
+__global__ void copy_array(float* src, float* dst, int N) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        dst[tid] = src[tid];
+    }
+}
+
+示例 6 — 填充（init_fill）：
+__global__ void fill_array(float* arr, int N, float value) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N) {
+        arr[tid] = value;
+    }
+}
+
+示例 7 — 简单矩阵乘法（gemm_simple）：
+__global__ void matmul_naive(float* A, float* B, float* C, int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < M && col < N) {
+        float sum = 0.0f;
+        for (int k = 0; k < K; k++) {
+            sum += A[row * K + k] * B[k * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+}
+
+示例 8 — 1D 卷积/stencil（stencil_1d）：
+__global__ void stencil_1d(float* input, float* output, int N) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid > 0 && tid < N - 1) {
+        output[tid] = input[tid - 1] + input[tid] + input[tid + 1];
+    }
+}

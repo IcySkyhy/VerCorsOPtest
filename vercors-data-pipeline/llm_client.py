@@ -93,8 +93,40 @@ def call_llm(
 
     if provider == "zai":
         return _call_glm(messages, cfg)
+    elif provider == "responses":
+        return _call_responses(messages, model_name, cfg)
     else:
         return _call_openai(messages, model_name, cfg)
+
+
+def _call_responses(messages: list[dict], model_name: str, cfg: dict) -> str:
+    """通过 OpenAI Responses API 调用（如 gpt-5.5 代理）。"""
+    client = _get_openai_client(model_name)
+    # Responses API 用 input 而非 messages，但支持 messages 格式的列表
+    # 转换：messages → 单条 input 文本（Responses API 的输入方式）
+    input_text = _messages_to_text(messages)
+    response = client.responses.create(
+        model=cfg["model"],
+        input=input_text,
+        temperature=cfg["temperature"],
+        max_output_tokens=cfg["max_tokens"],
+    )
+    return response.output_text
+
+
+def _messages_to_text(messages: list[dict]) -> str:
+    """将 messages 列表转为纯文本（Responses API 输入格式）。"""
+    parts = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if role == "system":
+            parts.append(f"[System Instruction]\n{content}")
+        elif role == "user":
+            parts.append(content)
+        elif role == "assistant":
+            parts.append(content)
+    return "\n\n".join(parts)
 
 
 def _call_openai(messages: list[dict], model_name: str, cfg: dict) -> str:

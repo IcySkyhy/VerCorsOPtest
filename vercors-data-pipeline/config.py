@@ -34,17 +34,17 @@ MODEL_REGISTRY = {
             "reasoning_effort": "high",
         },
     },
-    "glm": {
-        "provider": "zai",                   # 使用 zai-sdk 客户端
-        "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
-        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-        "model": "glm-5.1",
-        "temperature": 0.3,
-        "max_tokens": 65536,                 # GLM-5.1 最大输出 128K
-        "timeout": 120,
-        # GLM-5.1 深度思考（编码任务建议开启）
-        "thinking": {"type": "enabled"},
-    },
+    # "glm": {
+    #     "provider": "zai",                   # 使用 zai-sdk 客户端
+    #     "api_key": os.environ.get("GLM_API_KEY", "sk-your-glm-key-here"),
+    #     "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+    #     "model": "glm-5.1",
+    #     "temperature": 0.3,
+    #     "max_tokens": 65536,                 # GLM-5.1 最大输出 128K
+    #     "timeout": 120,
+    #     # GLM-5.1 深度思考（编码任务建议开启）
+    #     "thinking": {"type": "enabled"},
+    # },
     # 备选：如果 zai-sdk URL 有问题，用 openai 兼容路径直连 coding 端点
     "glm-openai": {
         "provider": "openai",
@@ -54,6 +54,17 @@ MODEL_REGISTRY = {
         "temperature": 0.3,
         "max_tokens": 65536,
         "timeout": 120,
+        "thinking": {"type": "enabled"},
+    },
+    # GPT-5.5 via codex proxy（仅支持 /v1/responses 端点）
+    "gpt-5.5": {
+        "provider": "responses",             # OpenAI Responses API（非 Chat Completions）
+        "api_key": os.environ.get("GPT_API_KEY", "sk-your-gpt55-key-here"),
+        "base_url": "https://right.codes/codex/v1",
+        "model": "gpt-5.5",
+        "temperature": 0.3,
+        "max_tokens": 65536,
+        "timeout": 180,
     },
 }
 
@@ -91,19 +102,24 @@ VERCORS_TIMEOUT = 120
 # ============================================================
 # Agent 循环参数
 # ============================================================
+MAX_RETRIES = 10            # 最大重试轮数
 
-MAX_RETRIES = 10            # 最大重试轮数（首轮 + 4 次反馈修正）
-TEMP_DIR = "temp"    
-     
 # ============================================================
 # 路径配置
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CORPUS_DIR = os.path.join(BASE_DIR, "corpus")       # 干净 C 代码库
+WORKSPACE_ROOT = os.path.dirname(BASE_DIR)          # VerCorsOPtest/ 根目录
+
+# 语料库（按语言分目录）
+CORPUS_DIR = os.path.join(BASE_DIR, "corpus")       # corpus/ 根
+CORPUS_C_DIR = os.path.join(CORPUS_DIR, "c")        # corpus/c/   — 纯 C 代码
+CORPUS_CUDA_DIR = os.path.join(CORPUS_DIR, "cuda")  # corpus/cuda/ — CUDA 代码
+
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")     # Prompt 模板
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")       # 成功轨迹
 FAILED_DIR = os.path.join(BASE_DIR, "failed")       # 失败案例
 TEMP_DIR = os.path.join(BASE_DIR, "temp")           # 临时文件
+TESTLOG_DIR = os.path.join(WORKSPACE_ROOT, "testlog")  # VerCors 验证日志
 
 # ============================================================
 # 输出文件（模型隔离，便于对比）
@@ -122,24 +138,37 @@ STATS_FILE = os.path.join(OUTPUT_DIR, "stats.json")
 # 语料自动生成参数（扩展到万级数据）
 # ============================================================
 CODE_GEN_CONFIG = {
-    "target_count": 10000,                  # 目标语料总数
+    "target_count": {
+        "c": 10000,
+        "cuda": 5000,
+    },
     "gen_batch_size": 8,                    # 每类别每次生成的函数数（过大易超时）
     "max_concurrent": 1,                    # 并发请求数（单线程顺序，避免限流）
     "templates_file": os.path.join(BASE_DIR, "prompts", "code_gen_templates.txt"),
-    # 代码生成使用的模型（--model 命令行覆盖，或跟随 VERCORS_AGENT_MODEL）
+    "cuda_templates_file": os.path.join(BASE_DIR, "prompts", "cuda_gen_templates.txt"),
     "gen_model": DEFAULT_MODEL,             # 默认跟随 .env
-    "verify_model": DEFAULT_MODEL,          # 驱动 VerCors 验证的模型
     "min_lines": 5,
     "max_lines": 60,
-    "categories": [
-        "arithmetic",
-        "array_readonly",
-        "array_readwrite",
-        "conditional",
-        "nested_loop",
-        "prefix_cumulative",
-        "multi_array",
-    ],
+    "categories": {
+        "c": [
+            "arithmetic",
+            "array_readonly",
+            "array_readwrite",
+            "conditional",
+            "nested_loop",
+            "prefix_cumulative",
+            "multi_array",
+        ],
+        "cuda": [
+            "vector_add",           # 逐元素向量操作（add, sub, mul, div）
+            "reduction",            # 规约操作（sum, max, min）
+            "element_wise",         # 逐元素一元/二元变换（relu, sigmoid, scale）
+            "memory_ops",           # 内存搬运（copy, transpose, gather, scatter）
+            "init_fill",            # 初始化/填充（fill, arange, zero）
+            "gemm_simple",          # 简单矩阵乘法（无分块）
+            "stencil_1d",           # 1D stencil / 卷积（相邻元素依赖）
+        ],
+    },
 }
 
 # ============================================================
