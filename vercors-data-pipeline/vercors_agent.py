@@ -279,10 +279,9 @@ def process_file(
 # 批量处理入口
 # ============================================================
 def save_trajectory(trajectory: dict, model_name: str = None, lang: str = "c") -> None:
-    """将一条成功轨迹追加到 JSONL 文件（按模型+语言分文件）。"""
+    """将一条成功轨迹追加到统一 total 文件。"""
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    model_key = model_name or trajectory.get("model", config.DEFAULT_MODEL)
-    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_{model_key}.jsonl")
+    out_file = os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_total.jsonl")
     with open(out_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(trajectory, ensure_ascii=False) + "\n")
 
@@ -303,13 +302,9 @@ def save_failed(file_id: str, clean_code: str, trajectory: list) -> None:
 
 
 def get_completed_ids(model_name: str = None, lang: str = "c") -> set:
-    """读取已有轨迹文件，返回已完成的 file id 集合（兼容新旧命名）。"""
-    model_key = model_name or config.DEFAULT_MODEL
-    # 新命名: trajectories_{lang}_{model}.jsonl  旧命名: trajectories_{model}.jsonl
+    """从 total 文件中读取已完成的 file id 集合。"""
     candidates = [
-        os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_{model_key}.jsonl"),
-        os.path.join(config.OUTPUT_DIR, f"trajectories_{model_key}.jsonl"),
-        # 也检查反向语言（如果旧文件按旧格式存了 CUDA 数据但没有 lang 标记）
+        os.path.join(config.OUTPUT_DIR, f"trajectories_{lang}_total.jsonl"),
     ]
     completed = set()
     for out_file in candidates:
@@ -326,8 +321,7 @@ def get_completed_ids(model_name: str = None, lang: str = "c") -> set:
                 except json.JSONDecodeError:
                     continue
     if completed:
-        logger.info(f"  从已有轨迹加载了 {len(completed)} 个已完成 id "
-                     f"(模型={model_key}, 语言={lang})")
+        logger.info(f"  从已有轨迹加载了 {len(completed)} 个已完成 id (语言={lang})")
     return completed
 
 
@@ -474,7 +468,7 @@ def main() -> None:
     logger.info(f"  失败:   {stats['failed']} ({stats['failed']/stats['total']*100:.1f}%)")
     if stats["passed"] > 0:
         logger.info(f"  平均轮数: {stats['total_rounds']/stats['passed']:.1f}")
-    logger.info(f"  轨迹文件: output/trajectories_{lang}_{model_name}.jsonl")
+    logger.info(f"  轨迹文件: output/trajectories_{lang}_total.jsonl")
 
     stats_out = os.path.join(config.OUTPUT_DIR, f"stats_{lang}_{model_name}.json")
     with open(stats_out, "w", encoding="utf-8") as f:
