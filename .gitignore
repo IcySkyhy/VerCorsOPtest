@@ -28,6 +28,9 @@ failed/
 corpus/gen_*.c
 gen_*.c
 vercors-data-pipeline/corpus/gen_*.c
+gen_*.cu
+*.ii
+
 # IDE 配置
 .vscode/
 .idea/
