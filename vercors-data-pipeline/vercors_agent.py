@@ -117,11 +117,27 @@ def extract_errors(output: str) -> str:
         if any(kw in lower for kw in ["error", "fail", "warn", "cannot", "invalid", "unsat"]):
             error_lines.append(line)
 
+    # 检测 VerCors 自身崩溃
+    if "vercors has crashed" in output.lower():
+        crash_started = False
+        for line in lines:
+            if "cause follows" in line.lower() or "nocause found" in line.lower():
+                crash_started = True
+                continue
+            if crash_started:
+                if line.strip() and not line.startswith("\t") and not line.startswith("at "):
+                    break
+                error_lines.append(line)
+
     if not error_lines:
-        # 如果没有显式错误，返回最后 30 行
         error_lines = lines[-30:]
 
     return "\n".join(error_lines)
+
+
+def is_vercors_crash(output: str) -> bool:
+    """检测 VerCors 自身崩溃（非用户代码错误）。"""
+    return "vercors has crashed" in output.lower()
 
 
 # ============================================================

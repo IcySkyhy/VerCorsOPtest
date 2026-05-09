@@ -214,9 +214,9 @@ def call_llm_with_fallback(
 # C 代码提取（从 LLM 输出中）
 # ============================================================
 def extract_c_code(llm_output: str) -> str:
-    """从 LLM 输出中提取 C 代码（兼容多种格式）。"""
-    # 策略 1：匹配 ```c ... ``` 代码块
-    m = re.search(r"```c\s*\n(.*?)```", llm_output, re.DOTALL)
+    """从 LLM 输出中提取 C / CUDA 代码（兼容多种格式）。"""
+    # 策略 1：匹配 ```c / ```cu / ```cuda ... ``` 代码块
+    m = re.search(r"```(?:c|cu|cuda)\s*\n(.*?)```", llm_output, re.DOTALL)
     if m:
         return m.group(1).strip()
 
@@ -224,11 +224,15 @@ def extract_c_code(llm_output: str) -> str:
     m = re.search(r"```\s*\n(.*?)```", llm_output, re.DOTALL)
     if m:
         code = m.group(1).strip()
-        if "/*@" in code or "int " in code or "void " in code:
+        if "/*@" in code or "//@" in code or "int " in code or "void " in code or "__global__" in code:
             return code
 
-    # 策略 3：整个输出包含 /*@ 则直接返回
+    # 策略 3：CUDA //@ 格式（无代码块包裹）
+    if "//@" in llm_output:
+        return llm_output.strip()
+
+    # 策略 4：C 格式 /*@（无代码块包裹）
     if "/*@" in llm_output:
         return llm_output.strip()
 
-    raise ValueError("无法从 LLM 输出中提取 C 代码块")
+    raise ValueError("无法从 LLM 输出中提取 C/CUDA 代码块")

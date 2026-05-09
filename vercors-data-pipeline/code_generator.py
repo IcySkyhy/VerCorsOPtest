@@ -95,9 +95,10 @@ def _cuda_gen_prompt(category: str, count: int, template_section: str) -> str:
 2. 使用 `threadIdx.x`, `blockIdx.x`, `blockDim.x`, `gridDim.x` 计算线程 ID
 3. **绝对不要添加任何 VerCors 注释（/*@ ... @*/）**
 4. **绝对不要添加任何普通注释（// 或 /* ... */）**
-5. 按顺序输出，每个 kernel 之间用 `---` 分隔
-6. 只输出代码，不要任何解释文字
-7. 每个 kernel 5-60 行，功能明确，逻辑完整
+5. **所有指针参数不允许使用 const 修饰符**（VerCors 不兼容 const）
+6. 按顺序输出，每个 kernel 之间用 `---` 分隔
+7. 只输出代码，不要任何解释文字
+8. 每个 kernel 5-60 行，功能明确，逻辑完整
 {template_section}
 
 ## 类别说明：{category}

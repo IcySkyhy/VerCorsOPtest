@@ -182,3 +182,4 @@ __global__ void vector_scale(int* arr, int N, int scalar) {
 6. 循环变量范围含等号：`0 <= i && i <= len`
 7. CUDA kernel **必须**用 `//@` 逐行格式，`given` 子句放在 requires 之后、ensures 之前
 8. CUDA kernel 先用 `\forall*` 声明每个线程的权限，ensures 中归还权限
+9. **CUDA kernel 参数禁止使用 const 修饰符**（VerCors 不支持，会导致崩溃）
