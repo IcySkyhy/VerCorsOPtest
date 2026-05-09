@@ -50,34 +50,42 @@
 
 ## Part B: CUDA / VerCors 线程权限语法
 
-### B1. CUDA kernel 契约
-```
-/*@
-  requires N > 0;
-  requires arr != NULL;
-  // 对每个线程 tid，声明其对 arr[tid] 的权限
-  requires (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));
-  // 线程总数 = 网格大小
-  given int blockSize = blockDim.x;
-  given int gridSize = gridDim.x;
-@*/
-__global__ void kernel(int* arr, int N) {
+### B0. 关键格式区别
+- **C 代码**：使用 `/*@ ... @*/` 块注释
+- **CUDA kernel**：使用 `//@` 逐行注释（因为 `given` 子句在 `/*@ ... @*/` 块中可能不被 VerCors 支持）
+- 每行以 `//@` 开头，后跟一个空格，然后是注释内容
+
+### B1. CUDA kernel 契约（逐行 `//@` 格式）
+```c
+//@ requires N > 0;
+//@ requires a != NULL;
+//@ requires b != NULL;
+//@ requires c != NULL;
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
+//@ given    int blockSize = blockDim.x;
+//@ given    int gridSize  = gridDim.x;
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
+__global__ void vector_add(int* a, int* b, int* c, int N) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < N) {
-        arr[tid] = arr[tid] + 1;
+        c[tid] = a[tid] + b[tid];
     }
 }
 ```
 
-### B2. 线程权限的关键规则
-1. **`given` 子句**：声明 CUDA 内置变量的别名（`blockDim.x` → `blockSize`）
-2. **线程范围检查**：kernel 开头必须 `if (tid < N)`，VerCors 用此分支推断权限范围
-3. **`\forall*` 在线程维度**：`(\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], p))`
-4. **读写 = 1 权限**：`Perm(arr[tid], 1)` 表示当前线程独占写入权限
-5. **只读 = 1/2 权限**：`Perm(arr[tid], 1/2)` 表示共享只读权限
-6. **输出指针**：`ensures (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));` 返回权限
+### B2. `given` 子句的关键规则
+1. **必须使用 `//@` 逐行格式**，不能用 `/*@ ... @*/` 块格式（否则 `given` 解析失败）
+2. `given` 子句放在所有 `requires` 之后、`ensures` 之前
+3. 声明 CUDA 内置变量的别名：`given int blockSize = blockDim.x;`
+4. 线程范围检查：kernel 开头必须 `if (tid < N)`，VerCors 用此分支推断权限范围
+5. 权限声明用 `\forall*` 在线程维度：`(\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], p))`
+6. 读写 = `1` 权限，只读 = `1/2` 权限
 
-### B3. CUDA 常见模式速查表
+### B3. CUDA 常见模式速查表（`//@` 格式）
 
 | 场景 | requires | ensures |
 |------|----------|---------|
@@ -125,22 +133,20 @@ int sum_positive(int* arr, int len) {
 }
 ```
 
-### C3 — CUDA 向量加（CUDA）：
+### C3 — CUDA 向量加（使用 `//@` 逐行格式）：
 ```c
-/*@
-  requires N > 0;
-  requires a != NULL;
-  requires b != NULL;
-  requires c != NULL;
-  requires (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
-  requires (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
-  requires (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
-  given int blockSize = blockDim.x;
-  given int gridSize = gridDim.x;
-  ensures (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
-  ensures (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
-  ensures (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
-@*/
+//@ requires N > 0;
+//@ requires a != NULL;
+//@ requires b != NULL;
+//@ requires c != NULL;
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
+//@ given    int blockSize = blockDim.x;
+//@ given    int gridSize  = gridDim.x;
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(a[tid], 1/2));
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(b[tid], 1/2));
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(c[tid], 1));
 __global__ void vector_add(int* a, int* b, int* c, int N) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < N) {
@@ -151,14 +157,12 @@ __global__ void vector_add(int* a, int* b, int* c, int N) {
 
 ### C4 — CUDA 向量缩放（读写自身）：
 ```c
-/*@
-  requires N > 0;
-  requires arr != NULL;
-  requires (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));
-  given int blockSize = blockDim.x;
-  given int gridSize = gridDim.x;
-  ensures (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));
-@*/
+//@ requires N > 0;
+//@ requires arr != NULL;
+//@ requires (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));
+//@ given    int blockSize = blockDim.x;
+//@ given    int gridSize  = gridDim.x;
+//@ ensures  (\forall* int tid; 0 <= tid && tid < N; Perm(arr[tid], 1));
 __global__ void vector_scale(int* arr, int N, int scalar) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < N) {
@@ -171,10 +175,10 @@ __global__ void vector_scale(int* arr, int N, int scalar) {
 
 ## 重要规则（C & CUDA 通用）
 1. **绝对不要修改原有的代码逻辑**（函数签名、循环结构、变量名等）
-2. **只添加 `/*@ ... @*/` 形式的注释**
+2. C 代码使用 `/*@ ... @*/` 块注释，CUDA kernel 使用 `//@` 逐行注释
 3. 指针非空：`requires ptr != NULL;`
 4. 数组只读 = `Perm(arr[j], 1/2)`，读写 = `Perm(arr[j], 1)`
 5. 循环不变量必须包含**权限保持条件**
 6. 循环变量范围含等号：`0 <= i && i <= len`
-7. CUDA kernel **必须**有 `given` 子句声明 blockDim/gridDim
+7. CUDA kernel **必须**用 `//@` 逐行格式，`given` 子句放在 requires 之后、ensures 之前
 8. CUDA kernel 先用 `\forall*` 声明每个线程的权限，ensures 中归还权限
